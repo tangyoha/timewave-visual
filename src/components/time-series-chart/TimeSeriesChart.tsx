@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import {
@@ -107,7 +106,6 @@ interface ChartData {
   [key: string]: any;
 }
 
-// Enhanced interactive tooltip
 const CustomTooltip = ({ active, payload, label, series }: any) => {
   if (active && payload && payload.length) {
     const timestamp = new Date(label);
@@ -151,15 +149,12 @@ const CustomTooltip = ({ active, payload, label, series }: any) => {
   return null;
 };
 
-// Active point component to show on hover
 const ActiveDot = (props: any) => {
   const { cx, cy, stroke, dataKey } = props;
   
   return (
     <g>
-      {/* Outer glow effect */}
       <circle cx={cx} cy={cy} r={6} fill="#fff" opacity={0.4} />
-      {/* Main dot */}
       <circle cx={cx} cy={cy} r={4} fill={stroke} stroke="#fff" strokeWidth={2} />
     </g>
   );
@@ -180,17 +175,14 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
   showBrush = true,
   className,
 }) => {
-  // State for time control
   const [timeRange, setTimeRange] = useState(initialTimeRange);
-  const [startTime, setStartTime] = useState<Date>(new Date(Date.now() - 3600000)); // 1h ago
+  const [startTime, setStartTime] = useState<Date>(new Date(Date.now() - 3600000));
   const [endTime, setEndTime] = useState<Date>(new Date());
-  const [refreshInterval, setRefreshInterval] = useState(0); // 0 = off
+  const [refreshInterval, setRefreshInterval] = useState(0);
   const [timePrecision, setTimePrecision] = useState('second');
   
-  // State for query control
   const [query, setQuery] = useState(initialQuery);
   
-  // State for chart data
   const [series, setSeries] = useState<TimeSeriesData[]>(initialData || []);
   const [chartData, setChartData] = useState<ChartData[]>([]);
   const [hoveredPoint, setHoveredPoint] = useState<{
@@ -198,7 +190,6 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     values: Record<string, number>;
   } | undefined>(undefined);
   
-  // State for chart interaction
   const [zoomMode, setZoomMode] = useState(false);
   const [panMode, setPanMode] = useState(false);
   const [brushMode, setBrushMode] = useState(false);
@@ -208,15 +199,13 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
   const [chartType, setChartType] = useState<'line' | 'area'>('line');
   const [activePointIndex, setActivePointIndex] = useState<number | null>(null);
   const [yAxisDomain, setYAxisDomain] = useState<[number, number] | undefined>(undefined);
-  const [yAxisScale, setYAxisScale] = useState(100); // percentage of calculated domain
-  
-  // Refs
+  const [yAxisScale, setYAxisScale] = useState(100);
+
   const refreshTimerRef = useRef<number | null>(null);
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const interactionModeRef = useRef<'zoom' | 'pan' | 'brush' | null>(null);
   const chartRef = useRef<any>(null);
 
-  // Handle time range changes
   const handleTimeRangeChange = useCallback((newRange: string) => {
     setTimeRange(newRange);
     const [start, end] = getTimeRangeFromValue(newRange);
@@ -228,7 +217,6 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     }
   }, [onTimeRangeChange]);
 
-  // Handle custom time range changes
   const handleCustomTimeRangeChange = useCallback((start: Date, end: Date) => {
     setStartTime(start);
     setEndTime(end);
@@ -239,17 +227,14 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     }
   }, [onTimeRangeChange]);
 
-  // Handle refresh interval changes
   const handleRefreshIntervalChange = useCallback((interval: number) => {
     setRefreshInterval(interval);
     
-    // Clear existing timer
     if (refreshTimerRef.current) {
       window.clearInterval(refreshTimerRef.current);
       refreshTimerRef.current = null;
     }
     
-    // Set new timer if interval > 0
     if (interval > 0) {
       refreshTimerRef.current = window.setInterval(() => {
         refreshData();
@@ -257,16 +242,13 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     }
   }, []);
 
-  // Handle refresh button click
   const handleRefreshClick = useCallback(() => {
     refreshData();
   }, []);
 
-  // Refresh data
   const refreshData = useCallback(() => {
     setIsRefreshing(true);
     
-    // If timeRange is not custom, update the end time to now and recalculate start time
     if (timeRange !== 'custom') {
       const now = new Date();
       const [newStart] = getTimeRangeFromValue(timeRange);
@@ -278,7 +260,6 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
       }
     }
     
-    // Simulate data loading
     setTimeout(() => {
       const mockData = generateMockTimeSeriesData(3, 100, timeRange);
       setSeries(mockData);
@@ -291,7 +272,6 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     }, 500);
   }, [timeRange, query, onTimeRangeChange]);
 
-  // Handle query changes
   const handleQueryChange = useCallback((newQuery: string) => {
     setQuery(newQuery);
     
@@ -300,14 +280,12 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     }
   }, [onQueryChange]);
 
-  // Handle query submission
   const handleQuerySubmit = useCallback((submittedQuery: string) => {
     setIsRefreshing(true);
     
-    // Simulate data loading
     setTimeout(() => {
       const mockData = generateMockTimeSeriesData(
-        Math.floor(Math.random() * 2) + 2, // 2-3 series
+        Math.floor(Math.random() * 2) + 2,
         100,
         timeRange
       );
@@ -321,7 +299,6 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     }, 700);
   }, [timeRange]);
 
-  // Handle series visibility toggle
   const handleToggleSeries = useCallback((id: string) => {
     setSeries(prevSeries => 
       prevSeries.map(s => 
@@ -332,15 +309,12 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     );
   }, []);
 
-  // Format chart data from series
   useEffect(() => {
     if (series.length > 0) {
       const visibleSeries = series.filter(s => s.visible !== false);
       
-      // Create a map of all timestamps
       const timestampMap = new Map<number, ChartData>();
       
-      // Collect all data points
       visibleSeries.forEach(s => {
         s.data.forEach(point => {
           const timestamp = point.timestamp.getTime();
@@ -351,13 +325,11 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
             });
           }
           
-          // Add value to the timestamp entry
           const entry = timestampMap.get(timestamp)!;
           entry[s.id] = point.value;
         });
       });
       
-      // Convert map to array and sort by timestamp
       const newChartData = Array.from(timestampMap.values())
         .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
       
@@ -367,7 +339,6 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     }
   }, [series]);
 
-  // Handle component unmount
   useEffect(() => {
     return () => {
       if (refreshTimerRef.current) {
@@ -376,14 +347,12 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     };
   }, []);
 
-  // Load initial data if needed
   useEffect(() => {
     if (!initialData && series.length === 0 && !isLoading) {
       refreshData();
     }
   }, []);
 
-  // Reset interaction mode when changing modes
   useEffect(() => {
     if (zoomMode) {
       interactionModeRef.current = 'zoom';
@@ -402,7 +371,6 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     }
   }, [zoomMode, panMode, brushMode]);
 
-  // Handle selected area from brush
   const handleBrushChange = (brushData: any) => {
     if (!brushData || !brushData.startIndex || !brushData.endIndex) return;
     
@@ -417,7 +385,6 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     });
   };
 
-  // Apply selected area as time range
   const handleBrushApply = () => {
     if (!selectedArea.start || !selectedArea.end || selectedArea.start === selectedArea.end) return;
     
@@ -425,7 +392,6 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
       const startTime = chartData[selectedArea.start].timestamp;
       const endTime = chartData[selectedArea.end].timestamp;
       
-      // Apply the new time range
       handleCustomTimeRangeChange(startTime, endTime);
       setSelectedArea({});
       setBrushMode(false);
@@ -437,7 +403,6 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     }
   };
 
-  // Reset zoom and pan
   const handleResetView = () => {
     setYAxisDomain(undefined);
     setYAxisScale(100);
@@ -447,11 +412,9 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     setSelectedArea({});
   };
 
-  // Export chart as PNG
   const exportChart = useCallback(() => {
     if (chartContainerRef.current) {
       try {
-        // Create a canvas from the chart
         const svgElement = chartContainerRef.current.querySelector('svg');
         if (!svgElement) return;
         
@@ -460,20 +423,16 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
         const ctx = canvas.getContext('2d');
         const img = new Image();
         
-        // Set canvas dimensions
-        canvas.width = svgElement.clientWidth * 2; // 2x for better quality
+        canvas.width = svgElement.clientWidth * 2;
         canvas.height = svgElement.clientHeight * 2;
         
         img.onload = () => {
           if (ctx) {
-            // Fill with white background
             ctx.fillStyle = '#ffffff';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
-            // Draw the SVG
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
             
-            // Convert to PNG and download
             const dataUrl = canvas.toDataURL('image/png');
             const a = document.createElement('a');
             a.href = dataUrl;
@@ -501,7 +460,6 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     }
   }, []);
 
-  // Handle data CSV export
   const exportDataCSV = useCallback(() => {
     if (chartData.length === 0 || series.length === 0) {
       toast({
@@ -513,13 +471,10 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     }
     
     try {
-      // Get visible series
       const visibleSeries = series.filter(s => s.visible !== false);
       
-      // Create CSV header
       let csvContent = "timestamp," + visibleSeries.map(s => s.name).join(",") + "\n";
       
-      // Add data rows
       chartData.forEach(point => {
         const timestamp = formatAbsoluteTime(point.timestamp);
         const values = visibleSeries.map(s => {
@@ -530,7 +485,6 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
         csvContent += `${timestamp},${values}\n`;
       });
       
-      // Create and download file
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -554,7 +508,6 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     }
   }, [chartData, series]);
 
-  // Chart mouse move handler
   const handleChartMouseMove = (e: any) => {
     if (e && e.activePayload && e.activePayload.length > 0) {
       const timestamp = new Date(e.activeLabel);
@@ -569,13 +522,11 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     }
   };
 
-  // Chart mouse leave handler
   const handleChartMouseLeave = () => {
     setHoveredPoint(undefined);
     setActivePointIndex(null);
   };
 
-  // Chart click handler
   const handleChartClick = (e: any) => {
     if (!e || !e.activePayload || e.activePayload.length === 0) return;
     
@@ -586,19 +537,16 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
       values[payload.dataKey] = payload.value;
     });
     
-    // Log click event for now, could be extended for more functionality
     console.log('Chart clicked:', {
       timestamp: formatAbsoluteTime(timestamp),
       values
     });
   };
 
-  // Format X-axis tick
   const formatXAxisTick = (timestamp: number) => {
     return formatTimeForDisplay(new Date(timestamp), timePrecision);
   };
 
-  // Calculate Y-axis domain
   const calculateYAxisDomain = () => {
     if (chartData.length === 0) return [0, 100];
     
@@ -614,14 +562,12 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
       });
     });
     
-    // Adjust min/max to provide padding
     const padding = (max - min) * 0.1;
     const calculatedDomain: [number, number] = [
-      Math.max(0, min - padding), // Don't go below 0 for most metrics
+      Math.max(0, min - padding),
       max + padding
     ];
     
-    // Apply user scaling if set
     if (yAxisScale !== 100) {
       const range = calculatedDomain[1] - calculatedDomain[0];
       const scaleFactor = yAxisScale / 100;
@@ -632,12 +578,10 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     return calculatedDomain;
   };
 
-  // Handle Y-axis scale change
   const handleYAxisScaleChange = (value: number[]) => {
     setYAxisScale(value[0]);
   };
 
-  // Empty state
   if (!isLoading && !error && series.length === 0) {
     return (
       <Card className={cn("w-full", className)}>
@@ -662,7 +606,6 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     );
   }
 
-  // Determine chart cursor based on interaction mode
   const chartCursor = zoomMode 
     ? 'zoom-in' 
     : panMode 
@@ -690,7 +633,6 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
           </div>
           
           <div className="flex flex-wrap items-center gap-2">
-            {/* Chart type selector */}
             <ToggleGroup type="single" value={chartType} onValueChange={(value) => value && setChartType(value as 'line' | 'area')}>
               <ToggleGroupItem value="line" aria-label="线图">
                 <LineChartIcon className="h-4 w-4" />
@@ -988,11 +930,10 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
                       />
                     ))}
                   
-                  {/* Selection area for brush mode */}
                   {brushMode && selectedArea.start !== undefined && selectedArea.end !== undefined && (
                     <ReferenceArea 
-                      x1={chartData[selectedArea.start]?.timestamp} 
-                      x2={chartData[selectedArea.end]?.timestamp}
+                      x1={chartData[selectedArea.start]?.timestamp.getTime()} 
+                      x2={chartData[selectedArea.end]?.timestamp.getTime()}
                       strokeOpacity={0.3}
                       fill="#8884d8"
                       fillOpacity={0.2}
@@ -1077,11 +1018,10 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
                       />
                     ))}
                   
-                  {/* Selection area for brush mode */}
                   {brushMode && selectedArea.start !== undefined && selectedArea.end !== undefined && (
                     <ReferenceArea 
-                      x1={chartData[selectedArea.start]?.timestamp} 
-                      x2={chartData[selectedArea.end]?.timestamp}
+                      x1={chartData[selectedArea.start]?.timestamp.getTime()} 
+                      x2={chartData[selectedArea.end]?.timestamp.getTime()}
                       strokeOpacity={0.3}
                       fill="#8884d8"
                       fillOpacity={0.2}
@@ -1102,7 +1042,6 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
               )}
             </ResponsiveContainer>
             
-            {/* Area selection controls */}
             {brushMode && selectedArea.start !== undefined && selectedArea.end !== undefined && (
               <div className="absolute bottom-16 left-1/2 transform -translate-x-1/2 flex gap-2">
                 <Button
