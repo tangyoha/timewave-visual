@@ -13,16 +13,29 @@ import {
   ReferenceArea,
   Brush,
   Legend,
+  Area,
+  ComposedChart,
 } from 'recharts';
 import { 
-  AreaChart, 
+  AreaChart as AreaChartIcon, 
+  LineChart as LineChartIcon,
   ZoomIn, 
   ZoomOut, 
   Move, 
   RefreshCw, 
   Download,
   AlertTriangle,
-  Loader2
+  Loader2,
+  Crosshair,
+  PanelTop,
+  Maximize,
+  PanelBottomClose,
+  Eye,
+  EyeOff,
+  Ruler,
+  BarChart,
+  TrendingUp,
+  Focus
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -52,6 +65,8 @@ import QueryInput from './QueryInput';
 import ChartLegend from './ChartLegend';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Slider } from '@/components/ui/slider';
 
 import { 
   TIME_PRECISION, 
@@ -92,28 +107,37 @@ interface ChartData {
   [key: string]: any;
 }
 
+// Enhanced interactive tooltip
 const CustomTooltip = ({ active, payload, label, series }: any) => {
   if (active && payload && payload.length) {
     const timestamp = new Date(label);
+    const visiblePayload = payload.filter((entry: any) => {
+      const seriesData = series.find((s: TimeSeriesData) => s.id === entry.dataKey);
+      return seriesData && seriesData.visible !== false;
+    });
+    
+    if (visiblePayload.length === 0) return null;
     
     return (
-      <div className="custom-tooltip glass-panel p-3 text-sm shadow-lg">
-        <div className="font-medium mb-1.5">
+      <div className="custom-tooltip glass-panel p-3 text-sm shadow-lg max-w-xs">
+        <div className="font-medium mb-2 border-b pb-1.5">
           {formatAbsoluteTime(timestamp)}
         </div>
-        <div className="space-y-1">
-          {payload.map((entry: any, index: number) => {
+        <div className="space-y-2 max-h-[200px] overflow-auto pr-1">
+          {visiblePayload.map((entry: any, index: number) => {
             const seriesData = series.find((s: TimeSeriesData) => s.id === entry.dataKey);
             if (!seriesData || seriesData.visible === false) return null;
             
             return (
-              <div key={index} className="flex items-center">
-                <span
-                  className="w-3 h-3 rounded-full mr-2"
-                  style={{ backgroundColor: entry.color }}
-                />
-                <span className="max-w-[150px] truncate mr-2">{seriesData?.name}</span>
-                <span className="font-medium">
+              <div key={index} className="flex items-center justify-between gap-2">
+                <div className="flex items-center max-w-[70%]">
+                  <span
+                    className="w-3 h-3 rounded-full mr-2 flex-shrink-0"
+                    style={{ backgroundColor: entry.color }}
+                  />
+                  <span className="truncate" title={seriesData?.name}>{seriesData?.name}</span>
+                </div>
+                <span className="font-medium tabular-nums">
                   {formatValue(entry.value, seriesData?.unit)}
                 </span>
               </div>
@@ -127,8 +151,22 @@ const CustomTooltip = ({ active, payload, label, series }: any) => {
   return null;
 };
 
+// Active point component to show on hover
+const ActiveDot = (props: any) => {
+  const { cx, cy, stroke, dataKey } = props;
+  
+  return (
+    <g>
+      {/* Outer glow effect */}
+      <circle cx={cx} cy={cy} r={6} fill="#fff" opacity={0.4} />
+      {/* Main dot */}
+      <circle cx={cx} cy={cy} r={4} fill={stroke} stroke="#fff" strokeWidth={2} />
+    </g>
+  );
+};
+
 const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
-  title = 'Time Series Chart',
+  title = '时间序列图表',
   description,
   initialQuery = 'http_requests_total',
   initialTimeRange = '1h',
@@ -163,11 +201,20 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
   // State for chart interaction
   const [zoomMode, setZoomMode] = useState(false);
   const [panMode, setPanMode] = useState(false);
+  const [brushMode, setBrushMode] = useState(false);
+  const [crosshairMode, setCrosshairMode] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [selectedArea, setSelectedArea] = useState<{start?: number, end?: number}>({});
+  const [chartType, setChartType] = useState<'line' | 'area'>('line');
+  const [activePointIndex, setActivePointIndex] = useState<number | null>(null);
+  const [yAxisDomain, setYAxisDomain] = useState<[number, number] | undefined>(undefined);
+  const [yAxisScale, setYAxisScale] = useState(100); // percentage of calculated domain
   
   // Refs
   const refreshTimerRef = useRef<number | null>(null);
   const chartContainerRef = useRef<HTMLDivElement>(null);
+  const interactionModeRef = useRef<'zoom' | 'pan' | 'brush' | null>(null);
+  const chartRef = useRef<any>(null);
 
   // Handle time range changes
   const handleTimeRangeChange = useCallback((newRange: string) => {
@@ -238,8 +285,8 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
       setIsRefreshing(false);
       
       toast({
-        title: "Data refreshed",
-        description: `Query: ${query}`,
+        title: "数据已刷新",
+        description: `查询: ${query}`,
       });
     }, 500);
   }, [timeRange, query, onTimeRangeChange]);
@@ -268,8 +315,8 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
       setIsRefreshing(false);
       
       toast({
-        title: "Query executed",
-        description: `Executed: ${submittedQuery}`,
+        title: "查询已执行",
+        description: `已执行: ${submittedQuery}`,
       });
     }, 700);
   }, [timeRange]);
@@ -336,6 +383,70 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     }
   }, []);
 
+  // Reset interaction mode when changing modes
+  useEffect(() => {
+    if (zoomMode) {
+      interactionModeRef.current = 'zoom';
+      setPanMode(false);
+      setBrushMode(false);
+    } else if (panMode) {
+      interactionModeRef.current = 'pan';
+      setZoomMode(false);
+      setBrushMode(false);
+    } else if (brushMode) {
+      interactionModeRef.current = 'brush';
+      setZoomMode(false);
+      setPanMode(false);
+    } else {
+      interactionModeRef.current = null;
+    }
+  }, [zoomMode, panMode, brushMode]);
+
+  // Handle selected area from brush
+  const handleBrushChange = (brushData: any) => {
+    if (!brushData || !brushData.startIndex || !brushData.endIndex) return;
+    
+    if (brushData.startIndex === brushData.endIndex) {
+      setSelectedArea({});
+      return;
+    }
+    
+    setSelectedArea({
+      start: brushData.startIndex,
+      end: brushData.endIndex
+    });
+  };
+
+  // Apply selected area as time range
+  const handleBrushApply = () => {
+    if (!selectedArea.start || !selectedArea.end || selectedArea.start === selectedArea.end) return;
+    
+    if (chartData.length > 0) {
+      const startTime = chartData[selectedArea.start].timestamp;
+      const endTime = chartData[selectedArea.end].timestamp;
+      
+      // Apply the new time range
+      handleCustomTimeRangeChange(startTime, endTime);
+      setSelectedArea({});
+      setBrushMode(false);
+      
+      toast({
+        title: "时间范围已更新",
+        description: `从 ${formatAbsoluteTime(startTime)} 到 ${formatAbsoluteTime(endTime)}`,
+      });
+    }
+  };
+
+  // Reset zoom and pan
+  const handleResetView = () => {
+    setYAxisDomain(undefined);
+    setYAxisScale(100);
+    setBrushMode(false);
+    setPanMode(false);
+    setZoomMode(false);
+    setSelectedArea({});
+  };
+
   // Export chart as PNG
   const exportChart = useCallback(() => {
     if (chartContainerRef.current) {
@@ -374,16 +485,74 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
         };
         
         img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+        
+        toast({
+          title: "图表已导出",
+          description: "图表已保存为PNG图片",
+        });
       } catch (err) {
         console.error('Failed to export chart:', err);
         toast({
-          title: "Export failed",
-          description: "Could not export the chart as PNG",
+          title: "导出失败",
+          description: "无法将图表导出为PNG图片",
           variant: "destructive",
         });
       }
     }
   }, []);
+
+  // Handle data CSV export
+  const exportDataCSV = useCallback(() => {
+    if (chartData.length === 0 || series.length === 0) {
+      toast({
+        title: "导出失败",
+        description: "没有数据可以导出",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    try {
+      // Get visible series
+      const visibleSeries = series.filter(s => s.visible !== false);
+      
+      // Create CSV header
+      let csvContent = "timestamp," + visibleSeries.map(s => s.name).join(",") + "\n";
+      
+      // Add data rows
+      chartData.forEach(point => {
+        const timestamp = formatAbsoluteTime(point.timestamp);
+        const values = visibleSeries.map(s => {
+          const value = point[s.id];
+          return value !== undefined ? value : "";
+        }).join(",");
+        
+        csvContent += `${timestamp},${values}\n`;
+      });
+      
+      // Create and download file
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `chart-data-${new Date().toISOString().slice(0, 19)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      
+      toast({
+        title: "数据已导出",
+        description: "数据已导出为CSV文件",
+      });
+    } catch (err) {
+      console.error('Failed to export data:', err);
+      toast({
+        title: "导出失败",
+        description: "无法导出数据",
+        variant: "destructive",
+      });
+    }
+  }, [chartData, series]);
 
   // Chart mouse move handler
   const handleChartMouseMove = (e: any) => {
@@ -396,12 +565,32 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
       });
       
       setHoveredPoint({ timestamp, values });
+      setActivePointIndex(e.activeTooltipIndex);
     }
   };
 
   // Chart mouse leave handler
   const handleChartMouseLeave = () => {
     setHoveredPoint(undefined);
+    setActivePointIndex(null);
+  };
+
+  // Chart click handler
+  const handleChartClick = (e: any) => {
+    if (!e || !e.activePayload || e.activePayload.length === 0) return;
+    
+    const timestamp = new Date(e.activeLabel);
+    const values: Record<string, number> = {};
+    
+    e.activePayload.forEach((payload: any) => {
+      values[payload.dataKey] = payload.value;
+    });
+    
+    // Log click event for now, could be extended for more functionality
+    console.log('Chart clicked:', {
+      timestamp: formatAbsoluteTime(timestamp),
+      values
+    });
   };
 
   // Format X-axis tick
@@ -427,10 +616,25 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
     
     // Adjust min/max to provide padding
     const padding = (max - min) * 0.1;
-    return [
+    const calculatedDomain: [number, number] = [
       Math.max(0, min - padding), // Don't go below 0 for most metrics
       max + padding
     ];
+    
+    // Apply user scaling if set
+    if (yAxisScale !== 100) {
+      const range = calculatedDomain[1] - calculatedDomain[0];
+      const scaleFactor = yAxisScale / 100;
+      const newMax = calculatedDomain[0] + (range * scaleFactor);
+      return [calculatedDomain[0], newMax];
+    }
+    
+    return calculatedDomain;
+  };
+
+  // Handle Y-axis scale change
+  const handleYAxisScaleChange = (value: number[]) => {
+    setYAxisScale(value[0]);
   };
 
   // Empty state
@@ -442,21 +646,32 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
           {description && <CardDescription>{description}</CardDescription>}
         </CardHeader>
         <CardContent className="flex flex-col items-center justify-center py-10">
-          <AreaChart className="h-16 w-16 text-muted-foreground mb-3" />
-          <h3 className="text-lg font-medium">No data to display</h3>
+          <AreaChartIcon className="h-16 w-16 text-muted-foreground mb-3" />
+          <h3 className="text-lg font-medium">没有数据可显示</h3>
           <p className="text-sm text-muted-foreground mt-1">
-            Try changing your query or time range.
+            尝试更改查询或时间范围。
           </p>
           <Button 
             className="mt-4"
             onClick={refreshData}
           >
-            Load sample data
+            加载示例数据
           </Button>
         </CardContent>
       </Card>
     );
   }
+
+  // Determine chart cursor based on interaction mode
+  const chartCursor = zoomMode 
+    ? 'zoom-in' 
+    : panMode 
+      ? 'grab' 
+      : brushMode 
+        ? 'crosshair' 
+        : crosshairMode 
+          ? 'crosshair' 
+          : 'default';
 
   return (
     <Card className={cn("w-full overflow-hidden", className)}>
@@ -474,13 +689,23 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
             )}
           </div>
           
-          <div className="flex items-center space-x-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Chart type selector */}
+            <ToggleGroup type="single" value={chartType} onValueChange={(value) => value && setChartType(value as 'line' | 'area')}>
+              <ToggleGroupItem value="line" aria-label="线图">
+                <LineChartIcon className="h-4 w-4" />
+              </ToggleGroupItem>
+              <ToggleGroupItem value="area" aria-label="面积图">
+                <AreaChartIcon className="h-4 w-4" />
+              </ToggleGroupItem>
+            </ToggleGroup>
+            
             <Select
               value={timePrecision}
               onValueChange={setTimePrecision}
             >
-              <SelectTrigger className="w-[120px] h-8">
-                <SelectValue placeholder="Precision" />
+              <SelectTrigger className="w-[100px] h-8">
+                <SelectValue placeholder="精度" />
               </SelectTrigger>
               <SelectContent>
                 {TIME_PRECISION.map(precision => (
@@ -491,47 +716,101 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
               </SelectContent>
             </Select>
             
-            <TooltipProvider>
-              <UITooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant={zoomMode ? "secondary" : "outline"}
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() => {
-                      setZoomMode(!zoomMode);
-                      setPanMode(false);
-                    }}
-                  >
-                    <ZoomIn className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {zoomMode ? "Disable zoom" : "Enable zoom"}
-                </TooltipContent>
-              </UITooltip>
-            </TooltipProvider>
-            
-            <TooltipProvider>
-              <UITooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant={panMode ? "secondary" : "outline"}
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() => {
-                      setPanMode(!panMode);
-                      setZoomMode(false);
-                    }}
-                  >
-                    <Move className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {panMode ? "Disable pan" : "Enable pan"}
-                </TooltipContent>
-              </UITooltip>
-            </TooltipProvider>
+            <div className="flex items-center space-x-1">
+              <TooltipProvider>
+                <UITooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={zoomMode ? "secondary" : "outline"}
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => {
+                        setZoomMode(!zoomMode);
+                      }}
+                    >
+                      <ZoomIn className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {zoomMode ? "禁用缩放" : "启用缩放"}
+                  </TooltipContent>
+                </UITooltip>
+              </TooltipProvider>
+              
+              <TooltipProvider>
+                <UITooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={panMode ? "secondary" : "outline"}
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => {
+                        setPanMode(!panMode);
+                      }}
+                    >
+                      <Move className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {panMode ? "禁用平移" : "启用平移"}
+                  </TooltipContent>
+                </UITooltip>
+              </TooltipProvider>
+              
+              <TooltipProvider>
+                <UITooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={brushMode ? "secondary" : "outline"}
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => {
+                        setBrushMode(!brushMode);
+                      }}
+                    >
+                      <Focus className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {brushMode ? "取消选择" : "选择区域"}
+                  </TooltipContent>
+                </UITooltip>
+              </TooltipProvider>
+              
+              <TooltipProvider>
+                <UITooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={crosshairMode ? "secondary" : "outline"}
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => setCrosshairMode(!crosshairMode)}
+                    >
+                      <Crosshair className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {crosshairMode ? "隐藏十字线" : "显示十字线"}
+                  </TooltipContent>
+                </UITooltip>
+              </TooltipProvider>
+              
+              <TooltipProvider>
+                <UITooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={handleResetView}
+                    >
+                      <Maximize className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>重置视图</TooltipContent>
+                </UITooltip>
+              </TooltipProvider>
+            </div>
             
             <TooltipProvider>
               <UITooltip>
@@ -545,7 +824,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
                     <Download className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Export as PNG</TooltipContent>
+                <TooltipContent>导出为PNG</TooltipContent>
               </UITooltip>
             </TooltipProvider>
           </div>
@@ -553,8 +832,9 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
         
         <Tabs defaultValue="chart" className="w-full">
           <TabsList className="mb-2">
-            <TabsTrigger value="chart">Chart</TabsTrigger>
-            <TabsTrigger value="query">Query</TabsTrigger>
+            <TabsTrigger value="chart">图表</TabsTrigger>
+            <TabsTrigger value="query">查询</TabsTrigger>
+            <TabsTrigger value="options">选项</TabsTrigger>
           </TabsList>
           
           <TabsContent value="chart" className="pt-2">
@@ -570,7 +850,7 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
             {timeRange !== 'custom' && (
               <div className="mt-2 text-xs text-muted-foreground">
                 <Badge variant="outline" className="font-normal">
-                  {`Last ${timeRange}`}
+                  {`最近 ${timeRange}`}
                 </Badge>
                 <span className="mx-2">·</span>
                 <span>{formatDuration(endTime.getTime() - startTime.getTime())}</span>
@@ -586,6 +866,38 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
               disabled={isLoading}
             />
           </TabsContent>
+          
+          <TabsContent value="options" className="pt-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Y轴缩放</label>
+                <div className="flex items-center space-x-2">
+                  <Slider
+                    defaultValue={[100]}
+                    min={10}
+                    max={200}
+                    step={10}
+                    value={[yAxisScale]}
+                    onValueChange={handleYAxisScaleChange}
+                  />
+                  <span className="w-12 text-sm tabular-nums">{yAxisScale}%</span>
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-sm font-medium">数据导出</label>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="w-full"
+                  onClick={exportDataCSV}
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  导出为CSV
+                </Button>
+              </div>
+            </div>
+          </TabsContent>
         </Tabs>
       </CardHeader>
       
@@ -593,93 +905,223 @@ const TimeSeriesChart: React.FC<TimeSeriesChartProps> = ({
         {error ? (
           <div className="flex flex-col items-center justify-center py-10 text-destructive">
             <AlertTriangle className="h-10 w-10 mb-2" />
-            <h3 className="text-lg font-medium">Error loading data</h3>
+            <h3 className="text-lg font-medium">加载数据出错</h3>
             <p className="text-sm mt-1">{error}</p>
           </div>
         ) : isLoading ? (
           <div className="flex flex-col items-center justify-center py-16">
             <Loader2 className="h-10 w-10 animate-spin text-primary mb-2" />
-            <p className="text-sm text-muted-foreground">Loading data...</p>
+            <p className="text-sm text-muted-foreground">加载数据中...</p>
           </div>
         ) : (
           <div 
-            className="w-full overflow-hidden" 
-            style={{ height: showBrush ? '400px' : '350px' }}
+            className="w-full overflow-hidden relative" 
+            style={{ 
+              height: showBrush ? '400px' : '350px', 
+              cursor: chartCursor 
+            }}
             ref={chartContainerRef}
           >
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart
-                data={chartData}
-                margin={{ top: 10, right: 30, left: 10, bottom: showBrush ? 60 : 5 }}
-                onMouseMove={handleChartMouseMove}
-                onMouseLeave={handleChartMouseLeave}
-              >
-                <CartesianGrid 
-                  strokeDasharray="3 3" 
-                  vertical={false} 
-                  className="stroke-chart-grid"
-                />
-                <XAxis
-                  dataKey="timestamp"
-                  scale="time"
-                  type="number"
-                  domain={['dataMin', 'dataMax']}
-                  tickFormatter={formatXAxisTick}
-                  tick={{ fontSize: 12 }}
-                  minTickGap={50}
-                />
-                <YAxis
-                  domain={calculateYAxisDomain()}
-                  tick={{ fontSize: 12 }}
-                  tickFormatter={(value) => formatValue(value, yAxisUnit)}
-                  width={50}
-                />
-                <Tooltip 
-                  content={<CustomTooltip series={series} />}
-                  isAnimationActive={false}
-                />
-                
-                {thresholds?.map((threshold, index) => (
-                  <ReferenceLine
-                    key={`threshold-${index}`}
-                    y={threshold.value}
-                    stroke={threshold.color}
-                    strokeDasharray="3 3"
-                    label={{
-                      value: threshold.label,
-                      position: 'insideTopRight',
-                      fill: threshold.color,
-                      fontSize: 12,
-                    }}
+              {chartType === 'line' ? (
+                <LineChart
+                  data={chartData}
+                  margin={{ top: 10, right: 30, left: 10, bottom: showBrush ? 60 : 5 }}
+                  onMouseMove={handleChartMouseMove}
+                  onMouseLeave={handleChartMouseLeave}
+                  onClick={handleChartClick}
+                  ref={chartRef}
+                >
+                  <CartesianGrid 
+                    strokeDasharray="3 3" 
+                    vertical={false} 
+                    className="stroke-chart-grid"
                   />
-                ))}
-                
-                {series
-                  .filter(s => s.visible !== false)
-                  .map((s) => (
-                    <Line
-                      key={s.id}
-                      type="monotone"
-                      dataKey={s.id}
-                      stroke={s.color}
-                      strokeWidth={2}
-                      dot={false}
-                      activeDot={{ r: 4, strokeWidth: 1 }}
-                      isAnimationActive={false}
+                  <XAxis
+                    dataKey="timestamp"
+                    scale="time"
+                    type="number"
+                    domain={['dataMin', 'dataMax']}
+                    tickFormatter={formatXAxisTick}
+                    tick={{ fontSize: 12 }}
+                    minTickGap={50}
+                  />
+                  <YAxis
+                    domain={yAxisDomain || calculateYAxisDomain()}
+                    tick={{ fontSize: 12 }}
+                    tickFormatter={(value) => formatValue(value, yAxisUnit)}
+                    width={50}
+                  />
+                  <Tooltip 
+                    content={<CustomTooltip series={series} />}
+                    isAnimationActive={false}
+                    cursor={crosshairMode ? { stroke: '#888', strokeDasharray: '5 5' } : false}
+                  />
+                  
+                  {thresholds?.map((threshold, index) => (
+                    <ReferenceLine
+                      key={`threshold-${index}`}
+                      y={threshold.value}
+                      stroke={threshold.color}
+                      strokeDasharray="3 3"
+                      label={{
+                        value: threshold.label,
+                        position: 'insideTopRight',
+                        fill: threshold.color,
+                        fontSize: 12,
+                      }}
                     />
                   ))}
-                
-                {showBrush && (
-                  <Brush
-                    dataKey="timestamp"
-                    height={30}
-                    stroke="#8884d8"
-                    tickFormatter={formatXAxisTick}
-                    startIndex={Math.max(0, chartData.length - 50)}
+                  
+                  {series
+                    .filter(s => s.visible !== false)
+                    .map((s) => (
+                      <Line
+                        key={s.id}
+                        type="monotone"
+                        dataKey={s.id}
+                        stroke={s.color}
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={ActiveDot}
+                        isAnimationActive={false}
+                      />
+                    ))}
+                  
+                  {/* Selection area for brush mode */}
+                  {brushMode && selectedArea.start !== undefined && selectedArea.end !== undefined && (
+                    <ReferenceArea 
+                      x1={chartData[selectedArea.start]?.timestamp} 
+                      x2={chartData[selectedArea.end]?.timestamp}
+                      strokeOpacity={0.3}
+                      fill="#8884d8"
+                      fillOpacity={0.2}
+                    />
+                  )}
+                  
+                  {showBrush && (
+                    <Brush
+                      dataKey="timestamp"
+                      height={30}
+                      stroke="#8884d8"
+                      tickFormatter={formatXAxisTick}
+                      startIndex={Math.max(0, chartData.length - 50)}
+                      onChange={handleBrushChange}
+                    />
+                  )}
+                </LineChart>
+              ) : (
+                <ComposedChart
+                  data={chartData}
+                  margin={{ top: 10, right: 30, left: 10, bottom: showBrush ? 60 : 5 }}
+                  onMouseMove={handleChartMouseMove}
+                  onMouseLeave={handleChartMouseLeave}
+                  onClick={handleChartClick}
+                  ref={chartRef}
+                >
+                  <CartesianGrid 
+                    strokeDasharray="3 3" 
+                    vertical={false} 
+                    className="stroke-chart-grid"
                   />
-                )}
-              </LineChart>
+                  <XAxis
+                    dataKey="timestamp"
+                    scale="time"
+                    type="number"
+                    domain={['dataMin', 'dataMax']}
+                    tickFormatter={formatXAxisTick}
+                    tick={{ fontSize: 12 }}
+                    minTickGap={50}
+                  />
+                  <YAxis
+                    domain={yAxisDomain || calculateYAxisDomain()}
+                    tick={{ fontSize: 12 }}
+                    tickFormatter={(value) => formatValue(value, yAxisUnit)}
+                    width={50}
+                  />
+                  <Tooltip 
+                    content={<CustomTooltip series={series} />}
+                    isAnimationActive={false}
+                    cursor={crosshairMode ? { stroke: '#888', strokeDasharray: '5 5' } : false}
+                  />
+                  
+                  {thresholds?.map((threshold, index) => (
+                    <ReferenceLine
+                      key={`threshold-${index}`}
+                      y={threshold.value}
+                      stroke={threshold.color}
+                      strokeDasharray="3 3"
+                      label={{
+                        value: threshold.label,
+                        position: 'insideTopRight',
+                        fill: threshold.color,
+                        fontSize: 12,
+                      }}
+                    />
+                  ))}
+                  
+                  {series
+                    .filter(s => s.visible !== false)
+                    .map((s) => (
+                      <Area
+                        key={s.id}
+                        type="monotone"
+                        dataKey={s.id}
+                        stroke={s.color}
+                        fill={s.color}
+                        fillOpacity={0.3}
+                        strokeWidth={1.5}
+                        dot={false}
+                        activeDot={ActiveDot}
+                        isAnimationActive={false}
+                      />
+                    ))}
+                  
+                  {/* Selection area for brush mode */}
+                  {brushMode && selectedArea.start !== undefined && selectedArea.end !== undefined && (
+                    <ReferenceArea 
+                      x1={chartData[selectedArea.start]?.timestamp} 
+                      x2={chartData[selectedArea.end]?.timestamp}
+                      strokeOpacity={0.3}
+                      fill="#8884d8"
+                      fillOpacity={0.2}
+                    />
+                  )}
+                  
+                  {showBrush && (
+                    <Brush
+                      dataKey="timestamp"
+                      height={30}
+                      stroke="#8884d8"
+                      tickFormatter={formatXAxisTick}
+                      startIndex={Math.max(0, chartData.length - 50)}
+                      onChange={handleBrushChange}
+                    />
+                  )}
+                </ComposedChart>
+              )}
             </ResponsiveContainer>
+            
+            {/* Area selection controls */}
+            {brushMode && selectedArea.start !== undefined && selectedArea.end !== undefined && (
+              <div className="absolute bottom-16 left-1/2 transform -translate-x-1/2 flex gap-2">
+                <Button
+                  size="sm"
+                  onClick={handleBrushApply}
+                  className="text-xs"
+                >
+                  应用选择
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSelectedArea({})}
+                  className="text-xs"
+                >
+                  取消选择
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </CardContent>

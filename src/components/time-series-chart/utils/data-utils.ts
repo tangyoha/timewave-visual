@@ -4,6 +4,9 @@ import { subMinutes, subHours, addMinutes } from 'date-fns';
 export interface DataPoint {
   timestamp: Date;
   value: number;
+  anomaly?: boolean;
+  annotated?: boolean;
+  annotation?: string;
 }
 
 export interface TimeSeriesData {
@@ -14,6 +17,7 @@ export interface TimeSeriesData {
   visible?: boolean;
   query?: string;
   unit?: string;
+  aggregation?: string;
 }
 
 export interface PrometheusResponse {
@@ -58,6 +62,57 @@ export function parsePrometheusResponse(response: PrometheusResponse): TimeSerie
       visible: true,
     };
   });
+}
+
+// Function to detect anomalies in time series data
+export function detectAnomalies(data: DataPoint[], sensitivityFactor: number = 2): DataPoint[] {
+  if (!data || data.length < 5) return data;
+  
+  // Calculate rolling mean and standard deviation
+  const values = data.map(p => p.value);
+  const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
+  
+  // Calculate standard deviation
+  const squaredDiffs = values.map(v => Math.pow(v - mean, 2));
+  const avgSquaredDiff = squaredDiffs.reduce((sum, v) => sum + v, 0) / squaredDiffs.length;
+  const stdDev = Math.sqrt(avgSquaredDiff);
+  
+  // Mark anomalies
+  return data.map(point => {
+    const zScore = Math.abs((point.value - mean) / stdDev);
+    return {
+      ...point,
+      anomaly: zScore > sensitivityFactor
+    };
+  });
+}
+
+// Function to generate a smooth trend line from data points
+export function generateTrendLine(data: DataPoint[]): DataPoint[] {
+  if (!data || data.length < 3) return [];
+
+  // Simple linear regression for trend
+  const n = data.length;
+  const timestamps = data.map((p, i) => i); // Use index as x for simplicity
+  const values = data.map(p => p.value);
+  
+  let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+  
+  for (let i = 0; i < n; i++) {
+    sumX += timestamps[i];
+    sumY += values[i];
+    sumXY += timestamps[i] * values[i];
+    sumXX += timestamps[i] * timestamps[i];
+  }
+  
+  const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+  const intercept = (sumY - slope * sumX) / n;
+  
+  // Generate trend line data points
+  return data.map((point, i) => ({
+    timestamp: point.timestamp,
+    value: intercept + slope * i
+  }));
 }
 
 export function generateMockTimeSeriesData(
@@ -115,9 +170,26 @@ export function generateMockTimeSeriesData(
       // Ensure we don't go below zero for metrics
       value = Math.max(0, value);
       
+      // Add occasional anomalies (1% chance)
+      const isAnomaly = Math.random() < 0.01;
+      if (isAnomaly) {
+        value = value * (Math.random() > 0.5 ? 2 : 0.3); // Either spike or drop
+      }
+      
+      // Add occasional annotations (0.5% chance)
+      const isAnnotated = Math.random() < 0.005;
+      let annotation;
+      if (isAnnotated) {
+        const events = ["系统部署", "配置更改", "服务重启", "网络波动", "负载测试"];
+        annotation = events[Math.floor(Math.random() * events.length)];
+      }
+      
       data.push({
         timestamp: currentTime,
         value: Number(value.toFixed(2)),
+        anomaly: isAnomaly,
+        annotated: isAnnotated,
+        annotation: annotation
       });
       
       currentTime = addMinutes(currentTime, interval / (60 * 1000));
@@ -127,15 +199,20 @@ export function generateMockTimeSeriesData(
     const metricTypes = ['http_requests_total', 'memory_usage', 'cpu_usage', 'disk_io', 'network_traffic'];
     const metricType = metricTypes[i % metricTypes.length];
     const labels = ['service="api"', 'instance="server-01"', 'job="prometheus"', 'env="production"'];
+    const aggregations = ['avg', 'sum', 'max', 'min', 'rate'];
+    
+    // Add anomaly detection
+    const processedData = Math.random() > 0.7 ? detectAnomalies(data) : data;
     
     series.push({
       id: `series-${i}`,
       name: `${metricType}{${labels.slice(0, 2).join(', ')}}`,
       color: colors[i % colors.length],
-      data,
+      data: processedData,
       visible: true,
-      query: `${metricType}{${labels.slice(0, 2).join(', ')}}`,
+      query: `${aggregations[i % aggregations.length]}(${metricType}{${labels.slice(0, 2).join(', ')}})`,
       unit: i === 0 ? 'req/s' : i === 1 ? 'MB' : i === 2 ? '%' : '',
+      aggregation: aggregations[i % aggregations.length],
     });
   }
   
@@ -144,6 +221,11 @@ export function generateMockTimeSeriesData(
 
 export function formatValue(value: number, unit?: string): string {
   if (value === undefined || value === null) return 'N/A';
+  
+  // Format bytes with appropriate units if the unit is byte-related
+  if (unit === 'B' || unit === 'bytes') {
+    return formatBytes(value);
+  }
   
   // Format with appropriate precision
   let formattedValue: string;
@@ -163,4 +245,14 @@ export function formatValue(value: number, unit?: string): string {
   
   // Add unit if provided
   return unit ? `${formattedValue} ${unit}` : formattedValue;
+}
+
+// Helper function to format bytes to human-readable form
+export function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  
+  return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${units[i]}`;
 }
